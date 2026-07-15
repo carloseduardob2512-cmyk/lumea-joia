@@ -168,7 +168,7 @@
         select, .btn-nav { 
             padding: 10px 20px; 
             border-radius: 20px; 
-            border: 1px solid var(--rosa-lumea); 
+            border: 1px solid border: 1px solid var(--rosa-lumea); 
             color: var(--rosa-escuro); 
             font-weight: bold; 
             cursor: pointer; 
@@ -637,15 +637,33 @@
 
     <script>
         // ================= CONFIGURAÇÕES =================
-        const SENHA_ADMIN = "lumea123"; // Senha mantida: lumea123
+        const SENHA_ADMIN = "lumea123";
         const URL_APPSCRIPT = "https://script.google.com/macros/s/AKfycbyQFN7xNaLVlj7eRmNMN9_poZGtBTJ8i36Ewcme0-V2o1q4lHQOKJWQDngiTye36V2H/exec";
-        const TELEFONE_WPP = "5517996604191"; // Seu número com DDD
+        const TELEFONE_WPP = "5517996604191";
         let imagemBase64 = "";
         let carrinho = JSON.parse(localStorage.getItem('lumea_carrinho')) || [];
-        // ==================================================
+        let produtos = [];
 
-        // Banco de dados no LocalStorage
-        let produtos = JSON.parse(localStorage.getItem('lumea_produtos')) || [];
+        // Carregar produtos da planilha para todos os usuários
+        async function carregarProdutos() {
+            try {
+                const resposta = await fetch(URL_APPSCRIPT + "?acao=listar");
+                if (resposta.ok) {
+                    produtos = await resposta.json();
+                    salvarDados();
+                } else {
+                    throw new Error("Sem resposta da planilha");
+                }
+            } catch (erro) {
+                console.warn("Usando dados locais:", erro);
+                produtos = JSON.parse(localStorage.getItem('lumea_produtos')) || [];
+            }
+            renderizar();
+        }
+
+        function salvarDados() {
+            localStorage.setItem('lumea_produtos', JSON.stringify(produtos));
+        }
 
         // ========== SISTEMA DE CARRINHO COM QUANTIDADE ==========
         function atualizarCarrinho() {
@@ -772,7 +790,6 @@
             if (input.files && input.files[0]) {
                 const arquivo = input.files[0];
                 
-                // Aumentei limite para 2MB
                 if (arquivo.size > 2 * 1024 * 1024) {
                     alert("A imagem deve ter no máximo 2MB!");
                     input.value = "";
@@ -809,11 +826,7 @@
             renderizar();
         }
 
-        function salvarDados() {
-            localStorage.setItem('lumea_produtos', JSON.stringify(produtos));
-        }
-
-        // Enviar para Google Sheets (com fallback local)
+        // Enviar para Google Sheets
         async function enviarParaSheets(dados, acao = "salvar") {
             try {
                 const resposta = await fetch(URL_APPSCRIPT, {
@@ -824,8 +837,8 @@
                 const resultado = await resposta.text();
                 return resultado === "Sucesso";
             } catch (erro) {
-                console.warn("Não foi possível salvar na planilha, mas os dados ficaram salvos localmente:", erro);
-                return true; // Finge sucesso para não mostrar erro
+                console.warn("Erro na planilha, salvo localmente:", erro);
+                return true;
             }
         }
 
@@ -908,6 +921,7 @@
 
             const idEdicao = document.getElementById('prod-id-edicao').value;
             const dados = {
+                id: idEdicao ? Number(idEdicao) : Date.now(),
                 nome: document.getElementById('prod-nome').value,
                 preco: parseFloat(document.getElementById('prod-preco').value),
                 categoria: document.getElementById('prod-categoria').value,
@@ -919,50 +933,42 @@
                 const indice = produtos.findIndex(p => p.id === Number(idEdicao));
                 if (indice === -1) return;
                 
-                produtos[indice].nome = dados.nome;
-                produtos[indice].preco = dados.preco;
-                produtos[indice].categoria = dados.categoria;
-                if (dados.imagem) produtos[indice].imagem = dados.imagem;
-                
-                salvo = await enviarParaSheets({ ...produtos[indice] }, "editar");
+                produtos[indice] = dados;
+                salvo = await enviarParaSheets(dados, "editar");
             } else {
                 if (!imagemBase64) {
                     alert("Selecione uma imagem primeiro!");
                     return;
                 }
-                const novo = {
-                    id: Date.now(),
-                    ...dados,
-                    imagem: imagemBase64
-                };
-                produtos.push(novo);
-                salvo = await enviarParaSheets(novo);
+                produtos.push(dados);
+                salvo = await enviarParaSheets(dados, "salvar");
             }
 
-            // Agora sempre mostra sucesso, pois salva localmente
             salvarDados();
             cancelarEdicao();
             document.getElementById('aviso-sucesso').style.display = 'block';
-            renderizar();
+            await carregarProdutos(); // Atualiza para todos os usuários
         }
 
         function apagarProduto(id) {
             if (confirm("Tem certeza que deseja excluir este produto?")) {
                 produtos = produtos.filter(p => p.id !== id);
                 salvarDados();
+                enviarParaSheets({ id }, "apagar");
                 renderizar();
             }
         }
 
         function renderizar() {
-            salvarDados();
             renderizarCatalogo(produtos);
             renderizarTabela();
         }
 
         // Inicializa tudo
-        atualizarCarrinho();
-        renderizar();
+        document.addEventListener('DOMContentLoaded', () => {
+            atualizarCarrinho();
+            carregarProdutos();
+        });
     </script>
 </body>
 </html>
